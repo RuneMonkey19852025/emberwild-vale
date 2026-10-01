@@ -1,0 +1,16 @@
+# Unreal Engine build artifacts
+Binaries/
+Intermediate/
+DerivedDataCache/
+Saved/
+Build/Unused/
+
+# IDE / tooling
+.idea/
+.vs/
+.vscode/
+*.code-workspace
+
+# OS
+.DS_Store
+Thumbs.db

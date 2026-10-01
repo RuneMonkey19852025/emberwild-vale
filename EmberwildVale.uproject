@@ -1,0 +1,26 @@
+{
+	"FileVersion": 3,
+	"EngineAssociation": "5.8",
+	"Category": "Game",
+	"Description": "Emberwild Vale - a creature-taming RPG with professions, crafting and a 3-act story. Full C++ port of the Unity original.",
+	"Modules": [
+		{
+			"Name": "EmberwildVale",
+			"Type": "Runtime",
+			"LoadingPhase": "Default",
+			"AdditionalDependencies": [
+				"Engine",
+				"Slate",
+				"SlateCore",
+				"UMG",
+				"Json"
+			]
+		}
+	],
+	"Plugins": [
+		{
+			"Name": "ModelingToolsEditorMode",
+			"Enabled": false
+		}
+	]
+}

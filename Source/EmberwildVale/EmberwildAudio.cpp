@@ -36,8 +36,16 @@ namespace
 
 	USfxWave* GetOrMake(const FString& Id)
 	{
+		// The cache is a process-lifetime static of *raw* pointers, so GC cannot
+		// see these waves and will collect them out from under us — after which
+		// Play() calls a virtual through the freed vtable and jumps to address 0.
+		// Root every wave we mint; there are only a handful, created once.
 		static TMap<FString, USfxWave*> Cache;
-		if (USfxWave** Found = Cache.Find(Id)) return *Found;
+		if (USfxWave** Found = Cache.Find(Id))
+		{
+			if (IsValid(*Found)) return *Found;
+			Cache.Remove(Id); // stale entry from a previous life — rebuild it
+		}
 
 		const FSfxRecipe R = RecipeFor(Id);
 		const int32 SampleRate = 22050;
@@ -61,6 +69,7 @@ namespace
 		Wave->SetNumFrames((uint32)NumSamples);
 		Wave->Duration = R.Dur;
 		Wave->NumChannels = 1;
+		Wave->AddToRoot(); // see the cache note above — never GC these
 
 		Cache.Add(Id, Wave);
 		return Wave;

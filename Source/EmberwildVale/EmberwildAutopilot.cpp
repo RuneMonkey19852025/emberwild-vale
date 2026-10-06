@@ -364,11 +364,15 @@ namespace
 			}
 
 			++A.Gathers;
-			if (S->Save.CountItem(TEXT("sigil_piece_c")) > PieceBefore)
+			const int32 PieceAfter = S->Save.CountItem(TEXT("sigil_piece_c"));
+			if (PieceAfter > PieceBefore)
 				LogP(FString::Printf(TEXT("Ember fragment dropped from %s (gather #%d)"), *VeinId, A.Gathers));
 			else if (A.Gathers % 10 == 0)
-				LogP(FString::Printf(TEXT("mining: %d gathers, no fragment yet (Miner Lv%d)"),
-					A.Gathers, MinerLvl));
+				LogP(FString::Printf(TEXT("mining: %d gathers (%s) (Miner Lv%d)"),
+					A.Gathers,
+					PieceAfter > 0 ? TEXT("fragment secured — filling out the window")
+								   : TEXT("no fragment yet"),
+					MinerLvl));
 		}
 
 		static float RateFor(const FBattleDriver& A, UEmberwildSubsystem* S)

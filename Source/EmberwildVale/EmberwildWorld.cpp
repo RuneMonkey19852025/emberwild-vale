@@ -97,6 +97,37 @@ UMaterialInstanceDynamic* AEmberwildWorldBuilder::ToonMID(UObject* Outer, const 
 namespace
 {
 	/** Scaled, colored primitive part parented to a root. */
+	/** Load a Quaternius MegaKit static mesh (CC0, imported to /Game/Quaternius). */
+	UStaticMesh* NatureMesh(const FString& Name)
+	{
+		static TMap<FString, UStaticMesh*> Cache;
+		if (UStaticMesh** Found = Cache.Find(Name)) return *Found;
+		const FString Path = FString::Printf(TEXT("/Game/Quaternius/StaticMeshes/%s/StaticMeshes/%s.%s"), *Name, *Name, *Name);
+		UStaticMesh* M = LoadObject<UStaticMesh>(nullptr, *Path);
+		if (!M)
+			UE_LOG(LogTemp, Warning, TEXT("[World] Quaternius mesh missing: %s"), *Path);
+		Cache.Add(Name, M);
+		return M;
+	}
+
+	/** Part() for imported meshes: keeps the glTF's own textured material. */
+	UStaticMeshComponent* PartMesh(USceneComponent* Parent, UStaticMesh* Mesh, const FString& Name,
+	                               const FVector& RelPos, const FVector& Scale,
+	                               const FRotator& RelRot = FRotator::ZeroRotator)
+	{
+		UStaticMeshComponent* C = NewObject<UStaticMeshComponent>(Parent->GetOwner());
+		C->SetupAttachment(Parent);
+		C->SetStaticMesh(Mesh);
+		C->SetRelativeLocation(RelPos);
+		C->SetRelativeRotation(RelRot);
+		C->SetRelativeScale3D(Scale);
+		C->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		if (Parent->GetOwner() && Parent->GetOwner()->GetWorld())
+			C->RegisterComponent();
+		return C;
+	}
+
+	/** Scaled, colored primitive part parented to a root. */
 	UStaticMeshComponent* Part(USceneComponent* Parent, UStaticMesh* Mesh, const FString& Name,
 	                           const FVector& RelPos, const FVector& Scale, const FString& Hex,
 	                           const FRotator& RelRot = FRotator::ZeroRotator)
@@ -189,6 +220,7 @@ void AEmberwildWorldBuilder::Build(AEmberwildPlayer* Player)
 	BuildBridge();
 	BuildGrass();
 	BuildTown();
+	BuildProps();
 }
 
 void AEmberwildWorldBuilder::BuildTerrain()
@@ -535,52 +567,114 @@ void AEmberwildWorldBuilder::BuildPathStones(const FVector& From, const FVector&
 	Spawned.Add(Path);
 }
 
-void AEmberwildWorldBuilder::ScatterTrees(const TCHAR* Zone, int32 Count, FVector2D XRange, FVector2D ZRange, const TCHAR* LeafHex)
+void AEmberwildWorldBuilder::BuildProps()
+{
+	// Unity parity (WorldBuilder.cs BuildProps): trees/rocks scattered per zone,
+	// out of the town pad. Meshes are the CC0 Quaternius Stylized Nature MegaKit
+	// (imported via Scripts/import_quaternius.py); each zone gets a themed mix.
+	ScatterTrees(TEXT("meadow"), 30, FVector2D(-30, 30), FVector2D(-30, 30), true,
+		{ "CommonTree_1", "CommonTree_2", "CommonTree_3", "CommonTree_4", "Bush_Common" });
+	ScatterTrees(TEXT("ridge"), 26, FVector2D(48, 95), FVector2D(-8, 40), false,
+		{ "Pine_1", "Pine_2", "Pine_3", "Pine_4", "DeadTree_1", "DeadTree_2" });
+	ScatterTrees(TEXT("hollow"), 34, FVector2D(-12, 32), FVector2D(58, 92), false,
+		{ "TwistedTree_1", "TwistedTree_2", "TwistedTree_3", "DeadTree_3", "DeadTree_4", "DeadTree_5", "Mushroom_Common" });
+
+	// rocks for silhouette variety
+	ScatterRocks(TEXT("meadow"), 10, FVector2D(-32, 32), FVector2D(-32, 32), true);
+	ScatterRocks(TEXT("ridge"), 18, FVector2D(46, 95), FVector2D(-10, 42), false);
+
+	// flowers & pebbles — small ground interest, meadow/ridge sprinkle
+	ScatterProps(TEXT("meadow"), 26, FVector2D(-34, 34), FVector2D(-34, 34), true,
+		{ "Flower_3_Group", "Flower_4_Group", "Clover_1", "Clover_2", "Pebble_Round_1", "Pebble_Round_2" });
+	ScatterProps(TEXT("ridge"), 18, FVector2D(46, 95), FVector2D(-10, 42), false,
+		{ "Pebble_Round_3", "Pebble_Square_1", "RockPath_Round_Small_1", "RockPath_Square_Small_2" });
+}
+
+void AEmberwildWorldBuilder::ScatterProps(const TCHAR* Zone, int32 Count, FVector2D XRange, FVector2D ZRange, bool bTownPad, std::initializer_list<const char*> Models)
+{
+	AActor* Props = GetWorld()->SpawnActor<AActor>(AActor::StaticClass());
+	USceneComponent* Root = NewObject<USceneComponent>(Props);
+	Props->SetRootComponent(Root);
+	Root->RegisterComponent();
+
+	TArray<UStaticMesh*> Meshes;
+	for (const char* M : Models)
+		if (UStaticMesh* Mesh = NatureMesh(UTF8_TO_TCHAR(M)))
+			Meshes.Add(Mesh);
+	if (Meshes.Num() == 0) { Spawned.Add(Props); return; }
+
+	for (int32 i = 0; i < Count; ++i)
+	{
+		const float PX = FMath::FRandRange(XRange.X, XRange.Y);
+		const float PZ = FMath::FRandRange(ZRange.X, ZRange.Y);
+		if (bTownPad && InTownPad(PX, PZ)) continue;
+		const float GY = GroundHeight(PX, PZ);
+		if (GY < 0.2f) continue;
+		UStaticMesh* Mesh = Meshes[FMath::RandRange(0, Meshes.Num() - 1)];
+		PartMesh(Root, Mesh, FString::Printf(TEXT("prop_%s_%d"), Zone, i),
+			FVector(PX, -PZ, GY + 0.02f), FVector(0.8f),
+			FRotator(0.f, FMath::FRandRange(0.f, 360.f), 0.f));
+	}
+	Spawned.Add(Props);
+}
+
+void AEmberwildWorldBuilder::ScatterTrees(const TCHAR* Zone, int32 Count, FVector2D XRange, FVector2D ZRange, bool bTownPad, std::initializer_list<const char*> Models)
 {
 	AActor* Trees = GetWorld()->SpawnActor<AActor>(AActor::StaticClass());
 	USceneComponent* Root = NewObject<USceneComponent>(Trees);
 	Trees->SetRootComponent(Root);
 	Root->RegisterComponent();
 
+	TArray<UStaticMesh*> Meshes;
+	for (const char* M : Models)
+		if (UStaticMesh* Mesh = NatureMesh(UTF8_TO_TCHAR(M)))
+			Meshes.Add(Mesh);
+	if (Meshes.Num() == 0) { Spawned.Add(Trees); return; }
+
 	for (int32 i = 0; i < Count; ++i)
 	{
 		const float PX = FMath::FRandRange(XRange.X, XRange.Y);
 		const float PZ = FMath::FRandRange(ZRange.X, ZRange.Y);
-		if (InTownPad(PX, PZ, 1.f)) continue;
+		if (bTownPad && InTownPad(PX, PZ, 1.f)) continue;
 		const float GY = GroundHeight(PX, PZ);
-		if (GY < 0.2f) continue;
+		if (GY < 0.2f) continue; // skip water
 
-		const float TrunkH = FMath::FRandRange(1.6f, 2.4f);
-		const FString TreeName = FString::Printf(TEXT("tree_%s_%d"), Zone, i);
-		Part(Root, EmberwildPrimCyl(), TreeName + TEXT("_trunk"), FVector(PX, -PZ, GY + TrunkH / 2),
-			FVector(0.22f, 0.22f, TrunkH), TEXT("#6E4A2E"));
-
-		const float CrownY = GY + TrunkH + 0.5f;
-		Part(Root, EmberwildPrimSphere(), TreeName + TEXT("_crown"), FVector(PX, -PZ, CrownY),
-			FVector(1.5f, 1.5f, 1.3f), LeafHex);
-		Part(Root, EmberwildPrimSphere(), TreeName + TEXT("_crown2"), FVector(PX + 0.4f, -PZ + 0.3f, CrownY - 0.4f),
-			FVector(1.0f, 1.0f, 0.9f), LeafHex);
+		UStaticMesh* Mesh = Meshes[FMath::RandRange(0, Meshes.Num() - 1)];
+		const float S = FMath::FRandRange(0.75f, 1.15f);
+		UStaticMeshComponent* C = PartMesh(Root, Mesh, FString::Printf(TEXT("tree_%s_%d"), Zone, i),
+			FVector(PX, -PZ, GY), FVector(S, S, S * FMath::FRandRange(0.9f, 1.15f)),
+			FRotator(0.f, FMath::FRandRange(0.f, 360.f), 0.f));
+		// gentle crown sway (registered on the whole actor like the primitive crowns)
+		if (C) SwayEntries.Add({ C, FMath::FRandRange(0.f, 6.28f), false });
 	}
 	Spawned.Add(Trees);
 }
 
-void AEmberwildWorldBuilder::ScatterRocks(const TCHAR* Zone, int32 Count, FVector2D XRange, FVector2D ZRange)
+void AEmberwildWorldBuilder::ScatterRocks(const TCHAR* Zone, int32 Count, FVector2D XRange, FVector2D ZRange, bool bTownPad)
 {
 	AActor* Rocks = GetWorld()->SpawnActor<AActor>(AActor::StaticClass());
 	USceneComponent* Root = NewObject<USceneComponent>(Rocks);
 	Rocks->SetRootComponent(Root);
 	Root->RegisterComponent();
+
+	UStaticMesh* RockMeshes[3] = { NatureMesh("Rock_Medium_1"), NatureMesh("Rock_Medium_2"), NatureMesh("Rock_Medium_3") };
+	TArray<UStaticMesh*> Meshes;
+	for (UStaticMesh* M : RockMeshes)
+		if (M) Meshes.Add(M);
+	if (Meshes.Num() == 0) { Spawned.Add(Rocks); return; }
+
 	for (int32 i = 0; i < Count; ++i)
 	{
 		const float PX = FMath::FRandRange(XRange.X, XRange.Y);
 		const float PZ = FMath::FRandRange(ZRange.X, ZRange.Y);
-		if (InTownPad(PX, PZ)) continue;
+		if (bTownPad && InTownPad(PX, PZ)) continue;
 		const float GY = GroundHeight(PX, PZ);
 		if (GY < 0.2f) continue;
-		const float RS = FMath::FRandRange(0.3f, 0.9f);
-		Part(Root, EmberwildPrimCube(), FString::Printf(TEXT("rock_%s_%d"), Zone, i),
-			FVector(PX, -PZ, GY + RS * 0.3f), FVector(RS, RS * FMath::FRandRange(0.7f, 1.2f), RS * 0.7f), TEXT("#8E8A80"),
-			FRotator(FMath::FRandRange(0.f, 20.f), FMath::FRandRange(0.f, 90.f), 0.f));
+		const float RS = FMath::FRandRange(0.6f, 1.5f);
+		UStaticMesh* Mesh = Meshes[FMath::RandRange(0, Meshes.Num() - 1)];
+		PartMesh(Root, Mesh, FString::Printf(TEXT("rock_%s_%d"), Zone, i),
+			FVector(PX, -PZ, GY + 0.05f), FVector(RS, RS * FMath::FRandRange(0.8f, 1.2f), RS * FMath::FRandRange(0.7f, 1.1f)),
+			FRotator(FMath::FRandRange(0.f, 8.f), FMath::FRandRange(0.f, 360.f), FMath::FRandRange(0.f, 8.f)));
 	}
 	Spawned.Add(Rocks);
 }

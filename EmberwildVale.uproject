@@ -21,6 +21,14 @@
 		{
 			"Name": "ModelingToolsEditorMode",
 			"Enabled": false
+		},
+		{
+			"Name": "PythonScriptPlugin",
+			"Enabled": true
+		},
+		{
+			"Name": "EditorScriptingUtilities",
+			"Enabled": true
 		}
 	]
 }

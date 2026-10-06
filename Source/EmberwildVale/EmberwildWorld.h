@@ -50,6 +50,7 @@ private:
 	void BuildBridge();
 	void BuildGrass();
 	void BuildTown();
+	void BuildProps();
 	void BuildPlaza();
 	void BuildHouse(const FString& Name, FVector2D XZ, float RotDeg, const TCHAR* WallHex, const TCHAR* RoofHex);
 	void BuildBellTower(FVector2D XZ);
@@ -57,8 +58,11 @@ private:
 	void SpawnLantern(const FString& Name, FVector2D XZ);
 	void BuildWell(const FVector& At);
 	void BuildPathStones(const FVector& From, const FVector& To);
-	void ScatterTrees(const TCHAR* Zone, int32 Count, FVector2D XRange, FVector2D ZRange, const TCHAR* LeafHex);
-	void ScatterRocks(const TCHAR* Zone, int32 Count, FVector2D XRange, FVector2D ZRange);
+	void ScatterTrees(const TCHAR* Zone, int32 Count, FVector2D XRange, FVector2D ZRange,
+		bool bTownPad = true, std::initializer_list<const char*> Models = {});
+	void ScatterRocks(const TCHAR* Zone, int32 Count, FVector2D XRange, FVector2D ZRange, bool bTownPad = true);
+	void ScatterProps(const TCHAR* Zone, int32 Count, FVector2D XRange, FVector2D ZRange,
+		bool bTownPad, std::initializer_list<const char*> Models);
 
 	UPROPERTY() TArray<TObjectPtr<AActor>> Spawned;
 

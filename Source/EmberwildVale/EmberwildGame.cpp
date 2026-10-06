@@ -181,6 +181,11 @@ void UEmberwildSubsystem::SetZone(const FString& ZoneId)
 
 void UEmberwildSubsystem::RollEncounter(float Dt)
 {
+#ifdef EMBERWILD_AUTOPILOT
+	// the headless autopilot scripts its own battles; random wilds would
+	// hijack its scripted phases (playtest-only, compiled out normally)
+	if (bSuppressEncounters) return;
+#endif
 	// parity: Unity's RollEncounter checks UiRouter.I.UiOpen — gate on the
 	// router's live state so wilds never open mid-dialogue/crafting/battle.
 	if (UIRouter.IsValid() && !UIRouter->IsWorldInputAllowed()) return;

@@ -38,6 +38,10 @@ public:
 	bool bSleeperSpawned = false;
 	bool bUiOpen = false;
 
+	/** Headless-playtest hook: the autopilot scripts its own battles, so it
+	 *  silences random wilds (playtest-only — nothing sets this normally). */
+	bool bSuppressEncounters = false;
+
 	// world refs
 	UPROPERTY() TObjectPtr<AEmberwildWorldBuilder> World;
 	UPROPERTY() TObjectPtr<AEmberwildPlayer> Player;

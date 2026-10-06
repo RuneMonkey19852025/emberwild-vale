@@ -31,5 +31,6 @@ public class EmberwildVale : ModuleRules
 		// Headless playtest autopilot (EmberwildAutopilot.cpp) stays compiled out.
 		// To run it, re-enable and do a `-game -nullrhi -nosound` boot:
 		//   PublicDefinitions.Add("EMBERWILD_AUTOPILOT=1");
+		PublicDefinitions.Add("EMBERWILD_AUTOPILOT=1");
 	}
 }

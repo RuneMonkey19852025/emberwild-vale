@@ -17,6 +17,7 @@
 #include "EmberwildWorld.generated.h"
 
 class UProceduralMeshComponent;
+class USkyLightComponent;
 class ACreatureActor;
 class AEmberwildPlayer;
 
@@ -45,7 +46,11 @@ protected:
 	virtual void Tick(float Dt) override;
 
 private:
+	void BuildLighting();
 	void BuildTerrain();
+	/** Sky ambient is recaptured ~1.5 s into Tick, once the world exists. */
+	TWeakObjectPtr<USkyLightComponent> SkyLightWeak;
+	float SkyRecaptureDelay = 1.5f;
 	void BuildWater();
 	void BuildBridge();
 	void BuildGrass();

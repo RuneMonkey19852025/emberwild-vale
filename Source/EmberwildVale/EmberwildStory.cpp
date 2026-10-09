@@ -271,6 +271,7 @@ void FEmberwildDB::InitStory()
 	// --- Zephy, herald ---
 	MakeNode(TEXT("zephy_fight"), {
 		FLineBuilder(TEXT("Zephy"), TEXT("The Vale forgets. The Sleepers remember. I am the bell before the quiet. Ring, little light."))
+			.OffersQuest(TEXT("q_herald"))
 			.SpawnsTrainer(TEXT("trainer_zephy")) });
 	MakeNode(TEXT("zephy_loop"), {
 		FLineBuilder(TEXT("Zephy"), TEXT("So the Vale keeps its noise a while longer. Go down. Wake it gently.")) });
@@ -278,6 +279,7 @@ void FEmberwildDB::InitStory()
 	// --- The Sleeper (finale) ---
 	MakeNode(TEXT("sleeper_final"), {
 		FLineBuilder(TEXT("The Sleeper"), TEXT("Little light. You climbed down carrying a dead god's sigil and a living flame."))
+			.OffersQuest(TEXT("q_sleeper"))
 			.ChoiceBranch(TEXT("sleeper_wake"), TEXT("sleeper_wait")) });
 	MakeNode(TEXT("sleeper_wake"), {
 		FLineBuilder(TEXT("The Sleeper"), TEXT("Then wake me. The Vale dreamed itself a guardian and forgot to tell it the war ended. I will hold. Take Gildra - my last gift to your small fires."))

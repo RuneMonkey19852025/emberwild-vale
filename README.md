@@ -43,12 +43,12 @@ timeout 90 ~/Unreal/Engine/Binaries/Linux/UnrealEditor \
 
 # Autopilot playtest: drives the quest loops through the real UI key handlers.
 # Needs EMBERWILD_AUTOPILOT=1 uncommented in Source/EmberwildVale/EmberwildVale.Build.cs
-# and a rebuild. It is wall-clock scheduled across 32 stages ending at ~t+2090s,
-# so it needs ~35 minutes — `timeout 90` above will NOT complete it.
+# and a rebuild. It is wall-clock scheduled across 35 stages ending at ~t+2510s,
+# so it needs ~43 minutes — `timeout 90` above will NOT complete it.
 # The autopilot calls StartNewGame() at boot, so it always plays from a fresh save
 # and any previous autosave in Saved/SaveGames/ is discarded.
 # (healthy run: "-- stage: done" in the log, zero "Fatal" lines, PASS/FAIL tallied)
-timeout 2400 ~/Unreal/Engine/Binaries/Linux/UnrealEditor \
+timeout 2800 ~/Unreal/Engine/Binaries/Linux/UnrealEditor \
     "$PWD/EmberwildVale.uproject" -game -nullrhi -nosound -nosplash -log
 grep -E '\[PASS\]|\[FAIL\]|stage: done' Saved/Logs/EmberwildVale.log | tail -40
 

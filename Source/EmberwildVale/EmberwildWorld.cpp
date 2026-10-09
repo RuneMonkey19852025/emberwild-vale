@@ -24,6 +24,12 @@
 #include "InputCoreTypes.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "UObject/ConstructorHelpers.h"
+#include "Engine/DirectionalLight.h"
+#include "Engine/SkyLight.h"
+#include "Engine/ExponentialHeightFog.h"
+#include "Components/DirectionalLightComponent.h"
+#include "Components/SkyLightComponent.h"
+#include "Components/ExponentialHeightFogComponent.h"
 
 // ================================================================ helpers
 FLinearColor AEmberwildWorldBuilder::HexColor(const FString& Hex)
@@ -215,6 +221,7 @@ float AEmberwildWorldBuilder::SurfaceHeight(float X, float Z)
 
 void AEmberwildWorldBuilder::Build(AEmberwildPlayer* Player)
 {
+	BuildLighting();
 	BuildTerrain();
 	BuildWater();
 	BuildBridge();
@@ -303,7 +310,53 @@ void AEmberwildWorldBuilder::BuildTerrain()
 	PMC->ContainsPhysicsTriMeshData(true);
 	PMC->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 	PMC->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
-	Spawned.Add(TerrainActor);
+	PMC->SetCollisionResponseToChannel(ECC_Camera, ECR_Block);		Spawned.Add(TerrainActor);
+}
+
+// Lit world needs lights: the toon/primitive look is built from engine lit
+// materials (BasicShapeMaterial MIDs, textured Quaternius meshes, vertex-lit
+// terrain) and nothing spawned a light before — the 3D world rendered black
+// behind the UI. Warm late-afternoon sun + neutral skylight + light fog.
+void AEmberwildWorldBuilder::BuildLighting()
+{
+	UWorld* W = GetWorld();
+
+	ADirectionalLight* Sun = W->SpawnActor<ADirectionalLight>();
+	if (ULightComponent* LC = Sun->GetLightComponent())
+	{
+		LC->SetMobility(EComponentMobility::Movable);
+		LC->SetIntensity(8.f);
+		LC->SetLightColor(FLinearColor(1.f, 0.93f, 0.82f));
+		LC->SetCastShadows(true);
+	}
+	// rotate the actor so the root light component definitely points down-sun
+	Sun->SetActorRotation(FRotator(-42.f, -35.f, 0.f));
+	Sun->AddInstanceComponent(Sun->GetLightComponent());
+	if (const ULightComponent* LC = Sun->GetLightComponent())
+		UE_LOG(LogTemp, Display, TEXT("[World] sun forward: %s"), *LC->GetForwardVector().ToString());
+
+	ASkyLight* Sky = W->SpawnActor<ASkyLight>();
+	if (USkyLightComponent* SC = Cast<USkyLightComponent>(Sky->GetLightComponent()))
+	{
+		SC->SetIntensity(1.2f);
+		SC->SetLightColor(FLinearColor(0.75f, 0.82f, 1.f));
+		SC->SetMobility(EComponentMobility::Movable);
+		SC->SetCastShadows(false);
+		SkyLightWeak = SC;
+		// Recaptured from Tick ~1.5s in, once the world actually exists —
+		// capturing an empty scene at spawn would bake black ambient.
+	}
+	Sky->AddInstanceComponent(Sky->GetLightComponent());
+
+	AExponentialHeightFog* Fog = W->SpawnActor<AExponentialHeightFog>();
+	if (UExponentialHeightFogComponent* FC = Fog->GetComponent())
+	{
+		FC->SetFogDensity(0.04f);
+		FC->SetFogInscatteringColor(FLinearColor(0.35f, 0.42f, 0.55f)); // gentle blue haze
+	}
+	Fog->AddInstanceComponent(Fog->GetComponent());
+
+	UE_LOG(LogTemp, Display, TEXT("[World] lighting built: sun + skylight + fog"));
 }
 
 void AEmberwildWorldBuilder::BuildWater()
@@ -687,6 +740,16 @@ void AEmberwildWorldBuilder::Tick(float Dt)
 {
 	// gentle crown/flame sway, mirroring the original's idle animation
 	Elapsed += Dt;
+	// delayed skylight recapture (see BuildLighting)
+	if (SkyLightWeak.IsValid() && SkyRecaptureDelay > 0.f)
+	{
+		SkyRecaptureDelay -= Dt;
+		if (SkyRecaptureDelay <= 0.f)
+		{
+			SkyLightWeak->RecaptureSky();
+			UE_LOG(LogTemp, Display, TEXT("[World] skylight recaptured"));
+		}
+	}
 	for (FSWayEntry& E : SwayEntries)
 	{
 		if (!E.Comp.IsValid()) continue;
@@ -1027,7 +1090,10 @@ AEmberwildPlayer::AEmberwildPlayer()
 	SpringArm->SetupAttachment(RootComponent);
 	SpringArm->TargetArmLength = 16.f;
 	SpringArm->SetRelativeRotation(FRotator(-38.f, -90.f, 0.f));
-	SpringArm->bDoCollisionTest = false;
+	// Terrain collision must pull the arm in when a hill sits behind the
+	// player, otherwise the camera ends up inside the ridge looking at the
+	// terrain's shadowed underside (black world with UI still visible).
+	SpringArm->bDoCollisionTest = true;
 	SpringArm->bUsePawnControlRotation = false;
 
 	Camera = CreateDefaultSubobject<UCameraComponent>(TEXT("Camera"));

@@ -14,3 +14,6 @@ Build/Unused/
 # OS
 .DS_Store
 Thumbs.db
+
+# playtest stdout wrapper logs (UE's own log lives in Saved/)
+PlaytestFull.log

@@ -17,6 +17,10 @@
 //        (Lv12/13) -> sigil_piece_b; mine the ridge copper/iron veins
 //        until the rare sigil_piece_c drops (1-in-10 per gather); Sela
 //        turn-in completes q_sigil.
+// Act 3: Zephy offers q_herald -> grind the team to Lv16 -> beat the
+//        Hollow Herald (Mind/Frost/Shade, Lv16/16/18) -> herald_down;
+//        the Sleeper offers q_sleeper -> choose wake -> sleeper_awake
+//        + the Gildra gift -> q_sleeper completes. Finale rewards.
 //
 // Battles use dice (catch rolls, damage variance), so each battle stage arms
 // the driver with a retry budget instead of assuming a first-try win. HP
@@ -37,6 +41,7 @@
 #include "EngineUtils.h"
 #include "TimerManager.h"
 #include "Misc/OutputDevice.h"
+#include "HAL/PlatformMisc.h"
 
 #ifdef EMBERWILD_AUTOPILOT
 
@@ -207,7 +212,7 @@ namespace
 	// live menu state and keys through it. Dice-dependent outcomes (catches,
 	// close trainer fights) get a retry budget: when a battle closes without
 	// meeting its goal, the driver starts the next one itself.
-	enum class EPlan { WeakenThenCatch, GrindFight, TobinFight, RidgeFight, HollisFight, MineLoop };
+	enum class EPlan { WeakenThenCatch, GrindFight, TobinFight, RidgeFight, HollisFight, ZephyFight, MineLoop };
 
 	struct FBattleDriver
 	{
@@ -440,6 +445,34 @@ namespace
 			}
 		}
 
+		/** Index of the strongest usable attack: never a 0-power status move
+		 *  (growl), and prefer STAB/type advantage only when it genuinely
+		 *  out-damages the neutral option. The driver blind-confirms menu cursor
+		 *  0, and level-ups rotate the learnset window, so cursor 0 is often
+		 *  growl — against a 3-mon trainer team that is a guaranteed stall-loss
+		 *  (a solo Lv16 sprigling lost every Zephy rematch that way). */
+		static int32 BestMoveIdx(UEmberwildSubsystem* S)
+		{
+			auto* B = S->Battle.Get();
+			const FCreature* PM = B ? B->PlayerMon() : nullptr;
+			const FCreature* EM = B ? B->EnemyMon() : nullptr;
+			if (!PM || !EM || !PM->Species() || !EM->Species()) return 0;
+
+			float BestScore = -1.f;
+			int32 BestIdx = 0;
+			for (int32 i = 0; i < PM->Moves.Num(); ++i)
+			{
+				const FMoveDef* MV = FEmberwildDB::Move(PM->Moves[i]);
+				if (!MV || MV->Power <= 0) continue;          // growl / lull etc.
+				if (PM->CurrentPP(MV->Id) <= 0) continue;     // out of PP
+				const float Eff = FTypeChart::Effectiveness(MV->Element, EM->Species()->Element, EM->Species()->Element2);
+				const float Stab = PM->Species()->Element == MV->Element ? 1.5f : 1.f;
+				const float Score = (float)MV->Power * Eff * Stab;
+				if (Score > BestScore) { BestScore = Score; BestIdx = i; }
+			}
+			return BestIdx;
+		}
+
 		/** Goal not met and budget remains? Start the next battle. */
 		bool MaybeRestart(UEmberwildSubsystem* S)
 		{
@@ -447,7 +480,7 @@ namespace
 			// spends every battle grinding never actually fights the trainer,
 			// and the stage then times out with the goal unmet.
 			const bool bGrinding = Plan == EPlan::GrindFight || Plan == EPlan::TobinFight
-				|| Plan == EPlan::RidgeFight || Plan == EPlan::HollisFight;
+				|| Plan == EPlan::RidgeFight || Plan == EPlan::HollisFight || Plan == EPlan::ZephyFight;
 			if (bGrinding && BattlesStarted >= MaxBattles - 3) return false;
 			if (BattlesStarted >= MaxBattles) return false;
 
@@ -506,8 +539,10 @@ namespace
 				break;
 			case EPlan::RidgeFight:
 				case EPlan::HollisFight:
+				case EPlan::ZephyFight:
 				{
-					const TCHAR* TrainerId = Plan == EPlan::RidgeFight ? TEXT("trainer_korrin") : TEXT("trainer_hollis");
+					const TCHAR* TrainerId = Plan == EPlan::RidgeFight ? TEXT("trainer_korrin")
+						: Plan == EPlan::HollisFight ? TEXT("trainer_hollis") : TEXT("trainer_zephy");
 					if (S->Save.DefeatedTrainers.Contains(TrainerId)) return false;
 					if (!S->Save.PartyAlive()) return false;
 					// underleveled? grind neutral wilds first (StopLevel via Arm)
@@ -525,18 +560,22 @@ namespace
 					bTriedLeadSwitch = false;
 						return true;
 					}
+					const TCHAR* Who = Plan == EPlan::RidgeFight ? TEXT("Korrin")
+						: Plan == EPlan::HollisFight ? TEXT("Hollis") : TEXT("Zephy");
+					const float AtX = Plan == EPlan::RidgeFight ? 70.f
+						: Plan == EPlan::HollisFight ? 6.f : 14.f;
+					const float AtZ = Plan == EPlan::RidgeFight ? 10.f
+						: Plan == EPlan::HollisFight ? -60.f : 66.f;
+					const TCHAR* NpcId = Plan == EPlan::RidgeFight ? TEXT("korrin")
+						: Plan == EPlan::HollisFight ? TEXT("hollis") : TEXT("zephy");
 					LogP(FString::Printf(TEXT("rematch vs %s (%d/%d)"),
-						Plan == EPlan::RidgeFight ? TEXT("Korrin") : TEXT("Hollis"),
-						BattlesStarted + 1, MaxBattles));
+						Who, BattlesStarted + 1, MaxBattles));
 					HealAtMira(S);
 					// buy back heals so every attempt walks in stocked
 					BuyShopItem(S, TEXT("salve"), 2);
-					TeleportTo(S, Plan == EPlan::RidgeFight ? 70.f : 6.f,
-						Plan == EPlan::RidgeFight ? 10.f : -60.f);
+					TeleportTo(S, AtX, AtZ);
 					S->MarkInteractCooldown(0.f);   // chained interacts eat the 0.3s window
-					TalkToNpcAt(S, Plan == EPlan::RidgeFight ? 70.f : 6.f,
-						Plan == EPlan::RidgeFight ? 10.f : -60.f,
-						Plan == EPlan::RidgeFight ? TEXT("korrin") : TEXT("hollis"));
+					TalkToNpcAt(S, AtX, AtZ, NpcId);
 					AdvanceDialogueThroughKeys(S);  // SpawnsTrainer -> battle opens
 					break;
 				}
@@ -589,7 +628,7 @@ namespace
 			// Grind dummies are Stone (Def 15), so they soak more turns than the
 			// old Burrowmouse targets — give the grind plans extra headroom.
 			const bool bGrindPlan = A.Plan == EPlan::GrindFight || A.Plan == EPlan::TobinFight
-				|| A.Plan == EPlan::RidgeFight || A.Plan == EPlan::HollisFight;
+				|| A.Plan == EPlan::RidgeFight || A.Plan == EPlan::HollisFight || A.Plan == EPlan::ZephyFight;
 			const int32 TickCap = bGrindPlan ? 150 : 90;
 			if (++A.Ticks > TickCap)
 			{
@@ -609,6 +648,27 @@ namespace
 			}
 
 			SEmberwildUIRouter* UI = S->UIRouter.Get();
+
+			// TEMP (act-3 debugging): EMBERWILD_DUMP=1 prints the battle UI state
+			// machine every tick — the engine's battle narration never reaches the
+			// log, so this is the only way to see what the keys actually land on.
+			// Remove together with BuildAct3OnlyStages.
+			static const bool bDumpBattle = FPlatformMisc::GetEnvironmentVariable(TEXT("EMBERWILD_DUMP")) == TEXT("1");
+			if (bDumpBattle)
+			{
+				const FCreature* PMd = S->Battle->PlayerMon();
+				const FCreature* EMd = S->Battle->EnemyMon();
+				int32 Salves = 0;
+				for (const FItemStack& It : S->Save.Inventory)
+					if (It.ItemId == TEXT("salve")) Salves += It.Count;
+				LogP(FString::Printf(TEXT("dump t=%d mode=%s cursor=%d items=%d active=%s %d/%d foe=%s %d/%d salves=%d"),
+					A.Ticks,
+					UI ? *UI->BattleMode : TEXT("?"), UI ? UI->BattleCursor : -1,
+					UI ? UI->BattleMenuItems.Num() : -1,
+					PMd ? *PMd->DisplayName() : TEXT("?"), PMd ? PMd->CurHP : -1, PMd ? PMd->MaxHP() : -1,
+					EMd ? *EMd->DisplayName() : TEXT("?"), EMd ? EMd->CurHP : -1, EMd ? EMd->MaxHP() : -1,
+					Salves));
+			}
 
 			// a fainted active mon must be switched before anything else
 			if (UI && UI->BattleMode == TEXT("menu") && S->Battle->PlayerMon()
@@ -643,6 +703,21 @@ namespace
 						// step at most 3 per tick so the next tick re-reads the cursor
 						for (int32 s = 0; s < FMath::Min(CoreIdx - UI->BattleCursor, 3); ++s)
 							DriveKey(S, EKeys::Down);
+						return;
+					}
+				}
+				// Moves submenu: never blind-confirm cursor 0. Level-ups rotate the
+				// learnset window and land status moves there (sprigling's Lv15
+				// window starts with growl; an evolved vaultmole's first slot is
+				// growl), and the driver confirms blind — against a 3-mon trainer
+				// team that stalls out as a guaranteed loss. Step one key per tick
+				// toward the strongest usable attack, re-reading the cursor each
+				// tick; confirm only when the cursor sits on it.
+				if (UI->BattleMode == TEXT("moves") && A.Plan != EPlan::WeakenThenCatch)
+				{
+					if (const int32 Best = BestMoveIdx(S); UI->BattleCursor != Best)
+					{
+						DriveKey(S, UI->BattleCursor < Best ? EKeys::Down : EKeys::Up);
 						return;
 					}
 				}
@@ -709,7 +784,10 @@ namespace
 			}
 			// trainer fights the party is underleveled for: heal from the battle
 			// bag when hurting — strongest item in stock (salve 40 > snack 25)
-			if ((A.Plan == EPlan::TobinFight || A.Plan == EPlan::RidgeFight || A.Plan == EPlan::HollisFight)
+			// ZephyFight included: a 3-mon trainer team drains the party faster
+			// than the between-battle Mira heal cycles alone can cover.
+			if ((A.Plan == EPlan::TobinFight || A.Plan == EPlan::RidgeFight
+				|| A.Plan == EPlan::HollisFight || A.Plan == EPlan::ZephyFight)
 				&& UI && UI->BattleMode == TEXT("menu"))
 			{
 				if (const FCreature* PM = S->Battle->PlayerMon())
@@ -794,8 +872,123 @@ namespace
 			}
 		}
 
+		/** TEMP (act-3 wiring check): EMBERWILD_ACT3_ONLY=1 fakes the act 1+2
+		 *  completion state and runs only Zephy -> Sleeper, so the new stages and
+		 *  the ZephyFight plan validate in ~8 minutes instead of a full ~43-minute
+		 *  script. Remove once proven. */
+		static const TArray<FStage>& BuildAct3OnlyStages()
+		{
+			static TArray<FStage> Stages =
+			{
+				{ 1.f, TEXT("title"), [](UEmberwildSubsystem* S, UWorld*)
+				{
+					DriveE(S);
+					LogStep(S->UIRouter.IsValid() && !S->UIRouter->bTitleActive, "title dismissed, world input live");
+				} },
+
+				{ 2.f, TEXT("fake-act12"), [](UEmberwildSubsystem* S, UWorld*)
+				{
+					for (const TCHAR* QId : { TEXT("q_firstcore"), TEXT("q_firstcatch"), TEXT("q_tobin"),
+						TEXT("q_professions"), TEXT("q_emberrock"), TEXT("q_sigil") })
+						S->Save.DoneQuests.Add(FString(QId));
+					S->Save.SetFlag(TEXT("has_sigil"));
+					S->Save.Coins = 800;
+					S->Save.AddItem(TEXT("verdant_sigil"), 1);
+					if (S->Save.Party.IsValidIndex(0))
+					{
+						// level bump only — keep the creation moveset (tackle first),
+						// exactly what organic play produces: FillMoves here would
+						// swap in the Lv15 learnset window whose first move is growl,
+						// and the driver's cursor-0 confirm would stall every battle
+						S->Save.Party[0].Level = 15;
+						S->Save.Party[0].CurHP = S->Save.Party[0].MaxHP();
+						// Reproduce the real run's party: the act-1/2 catches (a
+						// burrowmouse from q_firstcatch and a tidehound from the lake
+						// catch), built at the level a shared-XP playthrough carries
+						// into act 3. Party=1 was a test artifact — Zephy's 3-mon team
+						// beats any solo mon, so the wiring check never validated the
+						// scenario the full run actually faces.
+						auto Mate = [](const TCHAR* Sp, int32 Lvl)
+						{
+							FCreature M = FMonsterFactory::Create(Sp, Lvl);
+							M.CurHP = M.MaxHP();
+							return M;
+						};
+						S->Save.Party.Add(Mate(TEXT("burrowmouse"), 12));
+						S->Save.Party.Add(Mate(TEXT("tidehound"), 12));
+					}
+					LogP(							"ACT3-ONLY: act 1+2 state faked (quests done, has_sigil, leader Lv15, party of 3)");
+				} },
+
+				{ 4.f, TEXT("zephy-battle"), [](UEmberwildSubsystem* S, UWorld* W)
+				{
+					LogP("descending to the Hollow mouth");
+					HealAtMira(S);
+					BuyShopItem(S, TEXT("salve"), 4);
+					LogP("talking to Zephy");
+					TalkToNpcAt(S, 14.f, 66.f, TEXT("zephy"));
+					AdvanceDialogueThroughKeys(S);
+					LogStep(S->Save.ActiveQuests.Contains(TEXT("q_herald")),
+						"quest 'q_herald' accepted from Zephy");
+					LogStep(S->Battle.IsValid(), "trainer battle vs Zephy started");
+					if (S->Battle.IsValid())
+					{
+						// StopLevel 18 = parity with the ace (Nocturne Lv18). At 16 a
+						// solo Lv16 sprigling lost every wiring-test rematch; the real
+						// party shares XP across all slots, so grinding to 18 also
+						// lifts the catches that fight alongside the starter.
+						FBattleDriver::Get().Arm(W, S, EPlan::ZephyFight, 40, 18);
+						LogP("driver armed: grind to Lv18 (ace parity) then fight the Hollow Herald (Lv16/16/18)");
+					}
+				} },
+
+				{ 400.f, TEXT("herald-check"), [](UEmberwildSubsystem* S, UWorld* W)
+				{
+					FBattleDriver::Get().Stop(W);
+					LogStep(S->Save.DefeatedTrainers.Contains(TEXT("trainer_zephy")),
+						"Zephy defeated (DefeatedTrainers)");
+					LogStep(S->Save.HasFlag(TEXT("herald_down")), "flag herald_down set");
+					LogStep(S->Save.DoneQuests.Contains(TEXT("q_herald")),
+						"quest 'q_herald' auto-completed");
+					LogStep(S->Save.CountItem(TEXT("core_moon")) >= 1, "reward received: core_moon");
+					LogInv(S);
+				} },
+
+				{ 404.f, TEXT("sleeper"), [](UEmberwildSubsystem* S, UWorld* W)
+				{
+					LogP("descending to the Sleeper");
+					TalkToNpcAt(S, 55.f, 82.f, TEXT("sleepers"));
+					AdvanceDialogueThroughKeys(S);
+					bool bGildra = false;
+					for (const FCreature& C : S->Save.Party)
+						if (C.SpeciesId == TEXT("gildra")) bGildra = true;
+					LogStep(S->Save.HasFlag(TEXT("sleeper_awake")), "flag sleeper_awake set");
+					LogStep(bGildra, "Gildra joined the party");
+					LogStep(S->Save.DoneQuests.Contains(TEXT("q_sleeper")),
+						"quest 'q_sleeper' auto-completed");
+					LogStep(S->Save.CountItem(TEXT("revive_tonic")) >= 1, "reward received: revive_tonic");
+					LogInv(S);
+				} },
+
+				{ 410.f, TEXT("done"), [](UEmberwildSubsystem* S, UWorld* W)
+				{
+					LogStep(S->Save.DoneQuests.Contains(TEXT("q_herald")),
+						"ACT3-ONLY FINAL: q_herald completed");
+					LogStep(S->Save.DoneQuests.Contains(TEXT("q_sleeper")),
+						"ACT3-ONLY FINAL: q_sleeper completed");
+					LogP("ACT3-ONLY finished — quitting");
+					if (GEngine) GEngine->Exec(W, TEXT("exit"));
+				} },
+			};
+			return Stages;
+		}
+
 		static const TArray<FStage>& BuildStages()
 		{
+			// TEMP (act-3 wiring check): see BuildAct3OnlyStages above.
+			if (FPlatformMisc::GetEnvironmentVariable(TEXT("EMBERWILD_ACT3_ONLY")) == TEXT("1"))
+				return BuildAct3OnlyStages();
+
 			static TArray<FStage> Stages =
 			{
 				// ================================================== QUEST 1
@@ -1234,8 +1427,59 @@ namespace
 					LogInv(S);
 				} },
 
+				// ================================================== ACT 3: ZEPHY + THE SLEEPER
+				{ 2094.f, TEXT("zephy-battle"), [](UEmberwildSubsystem* S, UWorld* W)
+				{
+					LogP("descending to the Hollow mouth");
+					HealAtMira(S); // HP carries from the sigil grind; walk in rested
+					BuyShopItem(S, TEXT("salve"), 4);
+					LogP("talking to Zephy");
+					TalkToNpcAt(S, 14.f, 66.f, TEXT("zephy"));
+					AdvanceDialogueThroughKeys(S); // zephy_fight offers q_herald, then SpawnsTrainer
+					LogStep(S->Save.ActiveQuests.Contains(TEXT("q_herald")),
+						"quest 'q_herald' accepted from Zephy");
+					LogStep(S->Battle.IsValid(), "trainer battle vs Zephy started");
+					if (S->Battle.IsValid())
+					{
+						// StopLevel 18 = parity with the ace (Nocturne Lv18). At 16 a
+						// solo Lv16 sprigling lost every wiring-test rematch; the real
+						// party shares XP across all slots, so grinding to 18 also
+						// lifts the catches that fight alongside the starter.
+						FBattleDriver::Get().Arm(W, S, EPlan::ZephyFight, 40, 18);
+						LogP("driver armed: grind to Lv18 (ace parity) then fight the Hollow Herald (Lv16/16/18)");
+					}
+				} },
+
+				{ 2500.f, TEXT("herald-check"), [](UEmberwildSubsystem* S, UWorld* W)
+				{
+					FBattleDriver::Get().Stop(W);
+					LogStep(S->Save.DefeatedTrainers.Contains(TEXT("trainer_zephy")),
+						"Zephy defeated (DefeatedTrainers)");
+					LogStep(S->Save.HasFlag(TEXT("herald_down")), "flag herald_down set");
+					LogStep(S->Save.DoneQuests.Contains(TEXT("q_herald")),
+						"quest 'q_herald' auto-completed");
+					LogStep(S->Save.CountItem(TEXT("core_moon")) >= 1, "reward received: core_moon");
+					LogInv(S);
+				} },
+
+				{ 2504.f, TEXT("sleeper"), [](UEmberwildSubsystem* S, UWorld* W)
+				{
+					LogP("descending to the Sleeper");
+					TalkToNpcAt(S, 55.f, 82.f, TEXT("sleepers"));
+					AdvanceDialogueThroughKeys(S); // sleeper_final offers q_sleeper; Y picks wake
+					bool bGildra = false;
+					for (const FCreature& C : S->Save.Party)
+						if (C.SpeciesId == TEXT("gildra")) bGildra = true;
+					LogStep(S->Save.HasFlag(TEXT("sleeper_awake")), "flag sleeper_awake set");
+					LogStep(bGildra, "Gildra joined the party");
+					LogStep(S->Save.DoneQuests.Contains(TEXT("q_sleeper")),
+						"quest 'q_sleeper' auto-completed");
+					LogStep(S->Save.CountItem(TEXT("revive_tonic")) >= 1, "reward received: revive_tonic");
+					LogInv(S);
+				} },
+
 				// ================================================== summary + quit
-				{ 2090.f, TEXT("done"), [](UEmberwildSubsystem* S, UWorld* W)
+				{ 2510.f, TEXT("done"), [](UEmberwildSubsystem* S, UWorld* W)
 				{
 					LogStep(S->Save.DoneQuests.Contains(TEXT("q_firstcore")),
 						"FINAL: quest 1 (q_firstcore) completed");
@@ -1249,6 +1493,10 @@ namespace
 						"FINAL: act 2 ridge (q_emberrock) completed");
 					LogStep(S->Save.DoneQuests.Contains(TEXT("q_sigil")),
 						"FINAL: act 2 sigil (q_sigil) completed");
+					LogStep(S->Save.DoneQuests.Contains(TEXT("q_herald")),
+						"FINAL: act 3 herald (q_herald) completed");
+					LogStep(S->Save.DoneQuests.Contains(TEXT("q_sleeper")),
+						"FINAL: act 3 sleeper (q_sleeper) completed");
 					LogP("playtest finished — quitting");
 					if (GEngine) GEngine->Exec(W, TEXT("exit"));
 				} },
@@ -1282,7 +1530,7 @@ void EmberwildStartAutopilot(UEmberwildSubsystem* Sub)
 		LogP("previous save found - resetting to a fresh game for this playtest");
 	Sub->StartNewGame();
 #endif
-	LogP("armed: quest1+2 -> grind -> Tobin -> Juna professions -> Odessa -> Korrin -> Sela -> Hollis -> mine piece C -> Sela turn-in");
+	LogP("armed: quest1+2 -> grind -> Tobin -> Juna professions -> Odessa -> Korrin -> Sela -> Hollis -> mine piece C -> Sela turn-in -> Zephy -> wake the Sleeper");
 	if (UWorld* W = Sub->GetWorld())
 		W->GetTimerManager().SetTimer(A.StepHandle, []() { FAutopilot::Get().RunStages(); }, 0.25f, true);
 }

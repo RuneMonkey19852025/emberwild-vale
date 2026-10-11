@@ -58,6 +58,59 @@ grep -E '\[PASS\]|\[FAIL\]|stage: done' Saved/Logs/EmberwildVale.log | tail -40
 ./Binaries/Linux/EmberwildVale
 ```
 
+## Build & run on Windows
+
+Every script committed so far targets Linux (`install-engine.sh`, `package-game.sh`,
+`Build/Linux`, `Dist/Linux`). On Windows use the standard Unreal/Visual Studio
+toolchain, or the parity scripts added alongside this section:
+
+```powershell
+# One-shot: installs Git + Git LFS + Visual Studio (UE 5.8 workloads) + the Epic
+# Games Launcher, pulls the LFS content, generates project files and builds.
+powershell -ExecutionPolicy Bypass -File .\setup-windows.ps1
+
+# Build (editor by default; "game" for the standalone, "both" for both)
+.\build-game.cmd editor
+.\build-game.cmd game
+
+# Package a self-contained Windows build -> Dist\Windows\EmberwildVale\
+.\package-game.cmd
+```
+
+Set `EMBERWILD_ENGINE` if the engine is not in the default launcher folder, e.g.
+`set EMBERWILD_ENGINE=D:\Epic\UE_5.8`.
+
+### What has to be installed
+
+| Component | Version | Notes |
+|---|---|---|
+| Unreal Engine | **5.8** | Epic Games Launcher -> Library -> 5.8 (~75 GB + DDC). The `.uproject` pins `EngineAssociation: 5.8`. |
+| Visual Studio | **2026 (18.0+)** or **2022 (17.14+)** | 2026 is what Epic recommends for 5.8. |
+| MSVC toolset | 14.38 minimum, 14.50 recommended | via the "Game development with C++" workload |
+| Windows SDK | 10.0.26100 (minimum 10.0.22621.0) | |
+| .NET SDK | 10.0 | used by UnrealBuildTool |
+| Git + Git LFS | any recent | the repo tracks `.pak`/`.ucas`/`.utoc`/`.ushaderbytecode` through LFS |
+
+**Visual Studio workloads/components** (all added by `setup-windows.ps1`):
+`Desktop development with C++`, `Game development with C++`,
+`.NET desktop development`, `.NET Multi-platform App UI development`, plus the
+`MSVC v143` toolset, `C++ profiling tools`, `C++ AddressSanitizer` and
+`Windows 11 SDK 10.0.26100`. The Epic Games Launcher (which the VS
+"Unreal Engine installer" component would install) is installed separately.
+
+> **Git LFS matters.** `Content/ShaderArchive-*.ushaderbytecode` and the cooked
+> `.pak`/`.ucas`/`.utoc` files are stored as LFS pointers. Run `git lfs install`
+> once and `git lfs pull` after cloning, or the project opens with missing content.
+
+Manual equivalent of what `build-game.cmd` does:
+
+```powershell
+& "$env:ProgramFiles\Epic Games\UE_5.8\Engine\Build\BatchFiles\GenerateProjectFiles.bat" -project="$PWD\EmberwildVale.uproject" -game
+& "$env:ProgramFiles\Epic Games\UE_5.8\Engine\Build\BatchFiles\Build.bat" EmberwildValeEditor Win64 Development -project="$PWD\EmberwildVale.uproject" -WaitMutex
+```
+
+Then open `EmberwildVale.sln` (or double-click `EmberwildVale.uproject`) and press Play.
+
 ## Controls
 
 | Key | Action |
